@@ -35,6 +35,9 @@ src/
     setup_audiolcm_colab.sh
   generation/
     benchmark_audiolcm.py
+  features/
+    acoustic_features.py
+    extract_audio_features.py
   notebooks/
     audiolcm_colab_runner.ipynb
 ```
@@ -51,6 +54,66 @@ generation deadline separately.
 The setup script downloads each required model asset directly into its final
 location, verifies its expected byte size, and resumes partial downloads. A
 repeated setup reuses the existing Python environment and completed assets.
+
+## Phase 1 validated baseline
+
+The Phase 1 benchmark was completed on August 7, 2026 with the following
+configuration:
+
+```text
+GPU: NVIDIA A100-SXM4-40GB
+AudioLCM revision: 51db10c49ee3e1a36938a0bd3791cb732165964a
+PyTorch: 1.12.1+cu113
+CUDA runtime: 11.3
+Prompt: calm ambient piano, soft dynamics, no vocals
+Warm-up runs: 1
+Measured runs: 3
+```
+
+Measured results:
+
+```text
+Model and vocoder load: 29.743551 s
+Warm-up generation: 1.823130 s
+Measured generation 1: 0.226503 s
+Measured generation 2: 0.222656 s
+Measured generation 3: 0.224856 s
+Mean measured generation: 0.224672 s
+P95 measured generation: 0.226339 s
+Mean generated duration: 9.984 s
+Mean measured RTF: 0.022503
+Five-second deadline success: 100%
+Peak allocated GPU memory: 5.385517 GB
+```
+
+The benchmark times AudioLCM generation after the model and vocoder are
+loaded. The first generation is reported as warm-up and excluded from the
+measured mean, P95, RTF, and deadline-success statistics. Each native output
+is approximately 9.984 seconds; the script also saves its first five seconds
+as the future playback chunk.
+
+This result validates low-latency generation on the measured A100 setup. It
+does not validate direct control of the target acoustic features, continuous
+feature conditioning, improved RMSSD, or an online biofeedback loop.
+
+## Phase 2 acoustic features
+
+Phase 2 uses one shared implementation for the six acoustic control features:
+
+```text
+tempo
+rms_mean
+zcr_mean
+spectral_centroid_mean
+spectral_contrast5_std
+tonnetz1_mean
+```
+
+The extractor analyzes the first five seconds actually intended for playback.
+It preserves the native sample rate, uses an FFT size of 2048 and hop length of
+512, and explicitly uses five spectral-contrast bands. Five bands preserve the
+required `spectral_contrast5_std` feature while remaining valid for AudioLCM's
+16 kHz output.
 
 ## Research roadmap
 
