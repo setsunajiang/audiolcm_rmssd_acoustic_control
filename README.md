@@ -13,12 +13,14 @@ repository.
 
 Phase 1 establishes a reproducible AudioLCM baseline:
 
-1. Set up a pinned Colab environment.
+1. Set up a pinned Colab environment and AudioLCM source revision.
 2. Load AudioLCM and its vocoder.
 3. Generate AudioLCM's native audio output and derive the first five-second
    playback chunk.
-4. Measure cold model loading and warm batch-size-one generation latency.
-5. Record the runtime configuration and benchmark results.
+4. Run one explicit warm-up generation outside the reported statistics.
+5. Measure three warm batch-size-one generations against a five-second
+   deadline.
+6. Record the runtime configuration and benchmark results.
 
 This phase evaluates generation infrastructure and latency only. It does not
 claim continuous acoustic conditioning, RMSSD improvement, or a validated
@@ -45,6 +47,10 @@ AudioLCM currently produces a nominal ten-second raw clip. The future
 biofeedback loop will play and evaluate a five-second chunk from that output.
 Benchmark reports therefore record both the actual generated duration and the
 generation deadline separately.
+
+The setup script downloads each required model asset directly into its final
+location, verifies its expected byte size, and resumes partial downloads. A
+repeated setup reuses the existing Python environment and completed assets.
 
 ## Research roadmap
 

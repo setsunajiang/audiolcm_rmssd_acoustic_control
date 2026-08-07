@@ -24,6 +24,7 @@ def parse_args():
     parser.add_argument("--asset-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--prompt", default=DEFAULT_PROMPT)
+    parser.add_argument("--warmup-runs", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=3)
     parser.add_argument("--base-seed", type=int, default=20260807)
     parser.add_argument("--playback-seconds", type=float, default=5.0)
@@ -110,8 +111,18 @@ def main():
 
     rows = []
 
-    for run_index in range(1, args.repeats + 1):
-        seed = args.base_seed + run_index - 1
+    total_runs = args.warmup_runs + args.repeats
+
+    for generation_index in range(1, total_runs + 1):
+        is_warmup = generation_index <= args.warmup_runs
+        phase = "warmup" if is_warmup else "measured"
+        phase_index = (
+            generation_index
+            if is_warmup
+            else generation_index - args.warmup_runs
+        )
+        output_name = f"{phase}_{phase_index:03d}"
+        seed = args.base_seed + generation_index - 1
         set_seed(seed)
 
         prompt = {
@@ -126,7 +137,7 @@ def main():
             with model.ema_scope():
                 records = generator.gen_test_sample(
                     prompt,
-                    wav_name=f"warm_benchmark_{run_index:03d}",
+                    wav_name=output_name,
                 )
 
         synchronize()
@@ -140,7 +151,7 @@ def main():
         playback_samples = int(args.playback_seconds * sample_rate)
         played_audio = audio[:playback_samples]
         played_audio_path = (
-            played_audio_dir / f"warm_benchmark_{run_index:03d}_first_5s.wav"
+            played_audio_dir / f"{output_name}_first_5s.wav"
         )
         sf.write(
             played_audio_path,
@@ -151,7 +162,9 @@ def main():
 
         rows.append(
             {
-                "run_index": run_index,
+                "generation_index": generation_index,
+                "phase": phase,
+                "phase_index": phase_index,
                 "seed": seed,
                 "prompt": args.prompt,
                 "generation_seconds": generation_seconds,
@@ -166,7 +179,8 @@ def main():
         )
 
         print(
-            f"Run {run_index}: generation={generation_seconds:.6f}s, "
+            f"{phase.title()} {phase_index}: "
+            f"generation={generation_seconds:.6f}s, "
             f"audio={audio_seconds:.3f}s, "
             f"rtf={generation_seconds / audio_seconds:.6f}"
         )
@@ -177,19 +191,35 @@ def main():
         writer.writeheader()
         writer.writerows(rows)
 
-    latencies = [row["generation_seconds"] for row in rows]
+    warmup_rows = [row for row in rows if row["phase"] == "warmup"]
+    measured_rows = [row for row in rows if row["phase"] == "measured"]
+    measured_latencies = [
+        row["generation_seconds"] for row in measured_rows
+    ]
     summary = {
         "audiolcm_revision": git_revision(args.audiolcm_root),
         "torch_version": torch.__version__,
         "cuda_runtime": torch.version.cuda,
         "gpu_name": torch.cuda.get_device_name(0),
         "model_load_seconds": load_seconds,
-        "repeats": args.repeats,
-        "mean_generation_seconds": float(np.mean(latencies)),
-        "p95_generation_seconds": float(np.percentile(latencies, 95)),
+        "warmup_runs": args.warmup_runs,
+        "warmup_generation_seconds": [
+            row["generation_seconds"] for row in warmup_rows
+        ],
+        "measured_repeats": args.repeats,
+        "mean_generation_seconds": float(np.mean(measured_latencies)),
+        "p95_generation_seconds": float(
+            np.percentile(measured_latencies, 95)
+        ),
+        "mean_audio_seconds": float(
+            np.mean([row["audio_seconds"] for row in measured_rows])
+        ),
+        "mean_rtf": float(
+            np.mean([row["rtf"] for row in measured_rows])
+        ),
         "deadline_seconds": args.deadline_seconds,
         "deadline_success_rate": float(
-            np.mean([row["deadline_met"] for row in rows])
+            np.mean([row["deadline_met"] for row in measured_rows])
         ),
         "peak_gpu_memory_gb": torch.cuda.max_memory_allocated() / 1024**3,
         "runs_csv": str(csv_path),
